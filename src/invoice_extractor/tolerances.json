@@ -1,0 +1,30 @@
+{
+  "auto_pass_min_confidence": 0.90,
+  "vendor_match_min_score": 0.88,
+  "arithmetic_tolerance_abs": 0.02,
+  "inventory": {
+    "unit_price_tolerance_pct": 2.0,
+    "qty_tolerance_pct": 0.0
+  },
+  "expense": {
+    "amount_sigma": 3.0,
+    "min_band_pct": 10.0,
+    "min_history_samples": 6
+  },
+  "queues": {
+    "extraction_failed": "ap_review",
+    "low_confidence": "ap_review",
+    "incomplete": "ap_review",
+    "math_error": "ap_review",
+    "duplicate": "ap_review",
+    "vendor_unknown": "vendor_onboarding",
+    "missing_po": "purchasing",
+    "po_not_found": "purchasing",
+    "po_vendor_mismatch": "purchasing",
+    "item_not_on_po": "purchasing",
+    "price_variance": "purchasing",
+    "qty_over_receipt": "receiving",
+    "amount_anomaly": "accounting",
+    "no_history": "accounting"
+  }
+}
