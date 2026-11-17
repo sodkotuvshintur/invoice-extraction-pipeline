@@ -8,8 +8,10 @@ import pytest
 
 from invoice_extractor.extraction import rules
 from invoice_extractor.extraction.composite import CompositeExtractor
-from invoice_extractor.extraction.llm import LlmExtractor, LlmInvoice, LlmLine
+from invoice_extractor.extraction.llm import LlmExtractor, LlmInvoice, LlmLine, to_invoice
+from invoice_extractor.models import ExtractedInvoice, InvoiceLine
 from invoice_extractor.synth.generate import generate
+from invoice_extractor.validation import arithmetic
 
 
 @pytest.fixture(scope="module")
@@ -94,11 +96,66 @@ def test_llm_engine_reads_a_freeform_invoice_and_grounds_it(world):
     client = FakeClient(_as_llm(truth))
     ext = CompositeExtractor(llm=LlmExtractor(client=client)).extract(pdf)
     assert ext.engine == "llm" and ext.invoice.total == Decimal(truth["fields"]["total"])
-    assert ext.invoice.subtotal == ext.invoice.total            # derived from the lines
+    assert ext.invoice.subtotal is None and ext.invoice.tax is None   # not printed, so not invented
     assert ext.overall_confidence >= 0.9                        # every key value found in the PDF text
     sent = client.request
     assert sent["output_format"] is LlmInvoice
     assert sent["messages"][0]["content"][0]["source"]["media_type"] == "application/pdf"
+
+
+def test_total_above_the_lines_is_a_math_error_not_an_inferred_tax():
+    """Lines of 1,000.00 and a printed total of 1,050.00 with no tax line: the 50.00 must not vanish."""
+    raw = LlmInvoice(is_invoice=True, vendor_name="V", invoice_number="1", invoice_date="2026-09-01",
+                     due_date=None, po_number=None, subtotal=None, tax=None, total="1050.00",
+                     lines=[LlmLine(sku="A-1", description="x", qty="10", unit_price="100.00", amount="1000.00")])
+    inv = to_invoice(raw)
+    assert inv.tax is None and inv.subtotal is None
+    failed = [r for r in arithmetic(inv, 0.02) if not r.passed]
+    assert [r.exception for r in failed] == ["math_error"]
+    assert "1000.00" in failed[0].detail and "1050.00" in failed[0].detail
+
+
+TEXT = """Acme Supply
+Invoice no. 1777, written 10 October 2026.
+Due 11/09/2026
+20 of Widget (ABC-1001) at $185.00 apiece, which comes to $3,700.00.
+All together that is $1,100.00."""
+
+
+def _scored(**fields):
+    line = InvoiceLine(line_no=1, sku="ABC-1001", qty=Decimal(20), unit_price=Decimal("185.00"),
+                       amount=Decimal("3700.00"))
+    base = dict(vendor_name="Acme Supply", invoice_number="1777", invoice_date=date(2026, 10, 10),
+                due_date=date(2026, 11, 9), total=Decimal("1100.00"), lines=[line])
+    return rules.score(ExtractedInvoice(**{**base, **fields}), TEXT)
+
+
+def test_values_that_are_in_the_text_are_grounded():
+    conf = _scored()
+    assert all(conf[f] == 0.99 for f in ("vendor_name", "invoice_number", "invoice_date", "total", "lines"))
+
+
+@pytest.mark.parametrize("field, wrong", [
+    ("total", Decimal("100.00")),            # inside 1,100.00
+    ("total", Decimal("700.00")),            # inside 3,700.00
+    ("total", Decimal("1100.01")),
+    ("invoice_number", "177"),               # inside 1777
+    ("invoice_number", "777"),
+    ("invoice_date", date(2026, 10, 11)),    # right year, and '11' appears elsewhere in the text
+    ("invoice_date", date(2026, 9, 11)),     # day and month swapped from the due date
+])
+def test_partial_and_near_miss_values_are_not_grounded(field, wrong):
+    assert _scored(**{field: wrong})[field] < 0.9
+
+
+def test_a_line_amount_that_only_appears_inside_a_bigger_number_is_not_grounded():
+    line = InvoiceLine(line_no=1, sku="ABC-1001", qty=Decimal(1), unit_price=Decimal("85.00"), amount=Decimal("700.00"))
+    assert _scored(lines=[line])["lines"] < 0.9
+
+
+@pytest.mark.parametrize("text", ["08/14/2026", "2026-08-14", "August 14, 2026", "14 August 2026", "14-Aug-2026"])
+def test_dates_are_read_out_of_the_text_in_every_layout_format(text):
+    assert rules.dates_in(f"Dated {text}.") == {date(2026, 8, 14)}
 
 
 def test_llm_is_not_called_when_a_template_matches(world):

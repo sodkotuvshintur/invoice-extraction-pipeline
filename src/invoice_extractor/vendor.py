@@ -1,10 +1,14 @@
 """Match the name printed on an invoice to a vendor in the master file.
 
 The printed name is rarely the master name: legal suffixes, "&" vs "and",
-spacing. Normalise first, take an exact alias hit if there is one, otherwise
-the best fuzzy match above a threshold. Below the threshold the answer is
-"unknown" -- paying a look-alike vendor is a classic fraud path, so a weak
-match goes to vendor onboarding rather than being accepted.
+capitals. Normalising removes those, and a normalised name that equals a
+confirmed alias identifies the vendor (score 1.0).
+
+Anything else is at most a suggestion. A close fuzzy match is returned with
+its score so a reviewer sees "did you mean...", but the pipeline will not pay
+on it: a name one letter off a real vendor is exactly what an impersonator
+sends. Once a person confirms the name it is stored as an alias and matches
+exactly from then on. Below the threshold there is no suggestion at all.
 """
 from __future__ import annotations
 
@@ -49,3 +53,9 @@ def resolve(conn: sqlite3.Connection, printed_name: Optional[str], min_score: fl
         if best is None or score > best.score:
             best = VendorMatch(row["id"], row["name"], row["category"], round(score, 3))
     return best if best and best.score >= min_score else None
+
+
+def confirm_alias(conn: sqlite3.Connection, vendor_id: int, printed_name: str) -> None:
+    """A person has confirmed this printed name belongs to this vendor."""
+    conn.execute("INSERT OR IGNORE INTO vendor_alias (vendor_id, alias) VALUES (?, ?)",
+                 (vendor_id, normalise(printed_name)))

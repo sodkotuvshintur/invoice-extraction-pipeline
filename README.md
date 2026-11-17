@@ -31,11 +31,11 @@ with a known right answer for each, and scores the run against it.
 | | Templates only | Templates + Claude |
 |---|---|---|
 | Bad invoices queued for payment | **0** | **0** |
-| Invoices paid with no human touch | 54.8% (63 of 115) | 61.7% (71 of 115) |
-| Most that could have been, given the data | 61.7% | 61.7% |
+| Invoices paid with no human touch | 51.3% (59 of 115) | 58.3% (67 of 115) |
+| Most that could have been, given the data | 58.3% | 58.3% |
 | Good invoices sent to a human unnecessarily | 8 | 0 |
-| Problem invoices stopped | 44, worth $110,699 | 44, worth $110,699 |
-| Exceptions with the right queue and reason | 44 of 44 | 44 of 44 |
+| Problem invoices stopped | 48, worth $125,181 | 48, worth $125,181 |
+| Exceptions with the right queue and reason | 48 of 48 | 48 of 48 |
 
 Full reports: [templates only](docs/EVAL_REPORT.md), [with Claude](docs/EVAL_REPORT_LLM.md).
 
@@ -47,11 +47,14 @@ reached the payment queue, and each landed with the team that owns it.
 
 The 8 unnecessary reviews in the first column are invoices written as a
 letter rather than a form. No template reads them, so without a model they go
-to a person. With `--llm` they go to Claude Opus 5.5, which read all 8
-correctly on every field in a live run, and all 8 then cleared the same
-checks as any other invoice. Eight clean, born-digital letters is a small and
-easy sample. It shows the fallback path works end to end, not how the model
-would do on scans or handwriting.
+to a person. With `--llm` they go to Claude Opus 5.5. In a live run it read
+the vendor, number, dates, PO, total and every line correctly on all 8, and
+all 8 then cleared the same checks as any other invoice. On 2 of the 8 it
+also reported a subtotal the letter does not print (the single line's amount,
+restated). That field is not used for the decision, but it is the kind of
+helpful fill-in the checks are there to be suspicious of. Eight clean,
+born-digital letters is a small and easy sample. It shows the fallback path
+works end to end, not how the model would do on scans or handwriting.
 
 ## How it works
 
@@ -92,15 +95,21 @@ Four supplier layouts are generated, because a real inbox is never one template:
 | `missing_po`, `po_not_found`, `po_vendor_mismatch`, `item_not_on_po` | purchasing | The invoice cannot be tied to an order. |
 | `math_error` | AP review | The lines, tax and total disagree with each other. |
 | `amount_anomaly`, `no_history` | accounting | A non-PO bill well outside what this vendor usually charges, or too little history to tell. |
-| `vendor_unknown` | vendor onboarding | The name does not match an active vendor closely enough. |
+| `vendor_unconfirmed` | vendor onboarding | The name is close to a real vendor's but is not one a person has confirmed. The message names the vendor it resembles. |
+| `vendor_unknown` | vendor onboarding | The name resembles no active vendor. |
 | `low_confidence`, `incomplete`, `extraction_failed` | AP review | The document was not read well enough to act on. |
 
 ```
 $ invoice-extractor queue
 
 == purchasing ==
-  [price_variance] doc_0016.pdf  Keystone Electrical Distributors  #KE-7780  $678.40
-      ELC-1004 billed at 33.92, PO price 32.00 (+6.0%, tolerance 2.0%), overcharge 38.40
+  [price_variance] doc_0008.pdf  CASCADE FASTENER COMPANY, INC.  #INV-3697  $2,618.40
+      FST-1001 billed at 26.62, PO price 24.50 (+8.7%, tolerance 2.0%), overcharge 42.40
+
+== vendor_onboarding ==
+  [vendor_unconfirmed] doc_0019.pdf  Keystone Electric Distributors  #KE-7790  $2,414.00
+      'Keystone Electric Distributors' resembles Keystone Electrical Distributors (similarity 0.97)
+      but is not a confirmed name for it; confirm to add it as an alias, or reject
 ```
 
 One case worth calling out. A vendor resends an invoice with a new number, say
@@ -119,10 +128,17 @@ every comparison is stored. A model error can cause a review. It cannot cause
 a payment.
 
 **Confidence is checked, not self-reported.** The model is never asked how
-sure it is. Each extracted value is looked up in the PDF's own text layer. An
-invoice number or total that does not appear in the source scores low and the
-document goes to a person. A scan with no text layer cannot be checked this
-way, so it is always reviewed.
+sure it is. Each extracted value is looked up in the PDF's own text layer and
+has to match a whole value there: an amount must equal a complete number
+(100.00 is not found inside 1,100.00), an identifier must stand as its own
+token, and a date must equal a date the text states. A value that fails
+scores low and the document goes to a person. A scan with no text layer
+cannot be checked this way, so it is always reviewed.
+
+**Nothing is filled in.** If a document prints no tax line, tax stays empty.
+It is not back-calculated from the total, because a total that is 50.00 above
+the lines would then look like 50.00 of tax and pass. The lines and the
+printed total have to agree on their own.
 
 **The two kinds of mistake are not equal.** Reviewing a good invoice costs
 minutes. Paying a bad one costs the invoice. The evaluation reports them
@@ -130,11 +146,19 @@ separately, CI fails on a single false auto-pass, and the touchless rate is
 only ever quoted next to that count.
 
 **Refuse rather than guess.** A template that does not recognise a layout
-returns nothing. A vendor name that is only a rough match is treated as
-unknown, since a look-alike vendor is a known fraud route. An expense vendor
-with too little history is not auto-passed. A model saying "this is not an
-invoice" is not enough to discard a document, because a wrongly discarded
-bill is the one error nobody would ever review.
+returns nothing. An expense vendor with too little history is not
+auto-passed. A model saying "this is not an invoice" is not enough to discard
+a document, because a wrongly discarded bill is the one error nobody would
+ever review.
+
+**A similar vendor name is a suggestion, not a match.** Legal suffixes,
+capitals and "&" versus "and" are normalised away, and the result has to
+equal a name a person has already confirmed for that vendor. A name that is
+merely close, such as "Keystone Electric" for "Keystone Electrical", is never
+paid on, even when the PO, prices and quantities all match. It could be a
+typo or an impersonator and the system cannot tell which. The reviewer sees
+which vendor it resembles, and confirming it stores the name so the next
+invoice matches exactly.
 
 **Nothing writes to the ledger directly.** An approved invoice becomes a row
 in `ledger_outbox` with a unique idempotency key. A separate connector would
@@ -187,7 +211,7 @@ defaults to `claude-opus-5-5` and can be changed with `INVOICE_EXTRACTOR_MODEL`.
 | `invoice-extractor demo` | generate, run, eval |
 
 ```bash
-pytest -q    # 40 tests, no network
+pytest -q    # 57 tests, no network
 ```
 
 ## Layout
@@ -212,8 +236,12 @@ docs/EVAL_REPORT.md
 - Clean, born-digital PDFs only. No scans, no multi-page invoices, no credit
   memos, no multi-currency, no freight or tax allocation.
 - The Claude path has been run live on 8 documents only. Its cost was not measured.
-- The grounding check is a substring match on the text layer. It catches an
-  invented value. It would not catch a real value read into the wrong field.
+- The grounding check proves a value appears in the document. It does not
+  prove the value was read into the right field: a due date reported as the
+  invoice date would still be found. Dates written day-first with slashes
+  (14/08/2026) are not recognised and would send the document to review.
+- Vendor identity rests on the printed name. A real system would also check
+  the remit-to address and bank details against the vendor master.
 - No review UI. The queue is a table and a CLI command.
 - Each line is matched to the PO by item code. Suppliers who use their own
   part numbers would need a cross-reference table.

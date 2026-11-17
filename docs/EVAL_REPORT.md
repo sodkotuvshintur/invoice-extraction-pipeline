@@ -7,20 +7,20 @@
 | Metric | Value |
 |---|---|
 | **False auto-pass** (bad invoice queued for payment) | **0** |
-| Touchless rate (invoices auto-passed) | 54.8% |
-| Touchless ceiling (invoices that *should* auto-pass) | 61.7% |
+| Touchless rate (invoices auto-passed) | 51.3% |
+| Touchless ceiling (invoices that *should* auto-pass) | 58.3% |
 | Needless reviews (good invoice sent to a human) | 8 |
 | Decision accuracy | 93.3% |
 | Right decision, wrong exception type | 0 |
-| Value of problem invoices stopped | $110,699.45 |
+| Value of problem invoices stopped | $125,180.95 |
 
 ### Expected -> actual
 
 | Expected -> actual | Documents |
 |---|---|
-| auto_pass -> auto_pass | 63 |
+| auto_pass -> auto_pass | 59 |
 | auto_pass -> flag | 8 |
-| flag -> flag | 38 |
+| flag -> flag | 42 |
 | hold -> hold | 6 |
 | not_applicable -> not_applicable | 5 |
 
@@ -28,11 +28,12 @@
 
 | Scenario | Documents | Fully correct |
 |---|---|---|
-| clean | 42 | 42 |
+| clean | 38 | 38 |
 | duplicate | 6 | 6 |
 | expense_normal | 14 | 14 |
 | expense_spike | 5 | 5 |
 | freeform | 8 | 0 |
+| lookalike_vendor | 4 | 4 |
 | math_error | 4 | 4 |
 | missing_po | 5 | 5 |
 | price_variance | 8 | 8 |
@@ -63,5 +64,5 @@ Share of invoices the engine read where the field exactly matches ground truth. 
 | ap_review | 18 |
 | purchasing | 13 |
 | receiving | 11 |
-| vendor_onboarding | 5 |
+| vendor_onboarding | 9 |
 | accounting | 5 |

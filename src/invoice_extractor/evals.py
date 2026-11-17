@@ -23,6 +23,8 @@ MONEY = {"subtotal", "tax", "total"}
 
 
 def _same(field: str, want, got) -> bool:
+    if field == "tax":  # "no tax line" and "tax 0.00" are the same fact
+        want, got = want or 0, got or 0
     if want is None or got is None:
         return want is None and got is None
     if field in MONEY:

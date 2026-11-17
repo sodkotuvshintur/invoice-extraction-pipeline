@@ -12,8 +12,8 @@ CREATE TABLE vendors (
     status      TEXT NOT NULL DEFAULT 'active'      -- active | blocked
 );
 
--- One real supplier, many printed names ("Cascade Fastener Co." on the PO,
--- "CASCADE FASTENER COMPANY, INC." on the invoice).
+-- Names a person has confirmed belong to a vendor, normalised. Only an exact
+-- hit here identifies a vendor; a fuzzy match is a suggestion for a reviewer.
 CREATE TABLE vendor_alias (
     vendor_id   INTEGER NOT NULL REFERENCES vendors(id),
     alias       TEXT NOT NULL,                       -- normalised form

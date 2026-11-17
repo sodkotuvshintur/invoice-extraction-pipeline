@@ -42,6 +42,11 @@ VENDORS = [
     (13, "Northgate Property Management", "Northgate Property Management", "expense", "C", "RNT", "NG/{n}"),
     (14, "Brightline Telecom", "Brightline Telecom", "expense", "A", "TEL", "BT-{n}"),
 ]
+# Printed names AP has already confirmed, where normalising alone does not reach the master name.
+CONFIRMED_ALIASES = {5: ["Blue Water Plumbing Supply Co"]}
+# A name one slip away from a real vendor, on an otherwise valid invoice. Typo or impersonation:
+# the system cannot tell which, so it must not pay on it.
+LOOKALIKES = {1: "Cascade Fastners Co.", 4: "Summit Roofing Material Corp", 7: "Keystone Electric Distributors"}
 UNKNOWN_VENDORS = [("Apex Industrial Abrasives", "A", "ABR"), ("Granite State Tool Rental", "B", "RNL")]
 
 ITEMS = {
@@ -79,7 +84,7 @@ EXPENSE = {  # vendor_id -> (line description, typical monthly amount, tax rate)
 MIX = {
     "statement": 0.04, "expense_normal": 0.12, "expense_spike": 0.04, "freeform": 0.07,
     "price_within_tolerance": 0.06, "price_variance": 0.07, "qty_over_receipt": 0.06,
-    "duplicate": 0.05, "resubmitted_new_number": 0.03, "unknown_vendor": 0.04,
+    "duplicate": 0.05, "resubmitted_new_number": 0.03, "unknown_vendor": 0.04, "lookalike_vendor": 0.03,
     "missing_po": 0.04, "math_error": 0.03,
 }
 # scenario -> (expected decision, expected exception type)
@@ -89,6 +94,7 @@ EXPECTED = {
     "price_variance": ("flag", "price_variance"), "qty_over_receipt": ("flag", "qty_over_receipt"),
     "resubmitted_new_number": ("flag", "qty_over_receipt"),
     "duplicate": ("hold", "duplicate"), "unknown_vendor": ("flag", "vendor_unknown"),
+    "lookalike_vendor": ("flag", "vendor_unconfirmed"),
     "missing_po": ("flag", "missing_po"), "math_error": ("flag", "math_error"),
     "expense_spike": ("flag", "amount_anomaly"), "statement": ("not_applicable", None),
 }
@@ -198,6 +204,12 @@ class _World:
         po = self._new_po(vid)
         return self._doc(vid, self._bill_lines(po), "missing_po")
 
+    def lookalike(self) -> dict:
+        vid = self.rng.choice(list(LOOKALIKES))
+        po = self._new_po(vid)
+        return self._doc(vid, self._bill_lines(po), "lookalike_vendor", po_number=po["po_number"],
+                         vendor_name=LOOKALIKES[vid])
+
     def math_error(self) -> dict:
         doc = self.clean("math_error")
         doc["total"] += q(self.rng.choice([10, 25, 100, 250]))
@@ -266,6 +278,7 @@ def generate(out_dir: Path, n: int = 120, seed: int = 7) -> dict:
         "price_within_tolerance": lambda: w.price("price_within_tolerance"),
         "price_variance": lambda: w.price("price_variance"), "qty_over_receipt": w.qty_over,
         "unknown_vendor": w.unknown_vendor, "missing_po": w.missing_po, "math_error": w.math_error,
+        "lookalike_vendor": w.lookalike,
     }
     docs = [builders[s]() for s, k in counts.items() for _ in range(k)]
     n_clean = max(sum(n_copies), n - len(docs) - sum(n_copies))
@@ -295,6 +308,8 @@ def generate(out_dir: Path, n: int = 120, seed: int = 7) -> dict:
         name = f"doc_{i:04d}.pdf"
         layouts.render(doc, pdf_dir / name)
         decision, exception = EXPECTED[doc["scenario"]]
+        if doc["layout"] == "D":   # the letter prints a total and "no tax", never a subtotal
+            doc = {**doc, "subtotal": None}
         truth.append({
             "file": name, "scenario": doc["scenario"], "layout": doc["layout"],
             "expected_decision": decision, "expected_exception": exception,
@@ -305,7 +320,8 @@ def generate(out_dir: Path, n: int = 120, seed: int = 7) -> dict:
         })
 
     master = {
-        "vendors": [{"id": v[0], "name": v[1], "category": v[3]} for v in VENDORS],
+        "vendors": [{"id": v[0], "name": v[1], "category": v[3], "aliases": CONFIRMED_ALIASES.get(v[0], [])}
+                    for v in VENDORS],
         "purchase_orders": w.pos,
         "bill_history": w.history,
     }

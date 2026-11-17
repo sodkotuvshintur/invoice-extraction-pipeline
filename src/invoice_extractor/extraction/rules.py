@@ -7,6 +7,7 @@ unrecognised document falls through to the LLM engine or to a human.
 """
 from __future__ import annotations
 
+import calendar
 import io
 import re
 from datetime import date, datetime
@@ -129,18 +130,54 @@ def extract(pdf_bytes: bytes) -> Optional[Extraction]:
     return None
 
 
+_MONTHS = {name.lower(): i for i, name in enumerate(calendar.month_name) if name}
+_MONTHS.update({name.lower(): i for i, name in enumerate(calendar.month_abbr) if name})
+_DATE_PATTERNS = (  # (regex, which groups hold year, month, day)
+    (r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", (3, 1, 2)),              # 08/14/2026 (US order)
+    (r"\b(\d{4})-(\d{2})-(\d{2})\b", (1, 2, 3)),                  # 2026-08-14
+    (r"\b([A-Z][a-z]+)\.? (\d{1,2}), (\d{4})\b", (3, 1, 2)),      # August 14, 2026
+    (r"\b(\d{1,2}) ([A-Z][a-z]+)\.? (\d{4})\b", (3, 2, 1)),       # 14 August 2026
+    (r"\b(\d{1,2})-([A-Z][a-z]{2})-(\d{4})\b", (3, 2, 1)),        # 14-Aug-2026
+)
+
+
+def dates_in(text: str) -> set[date]:
+    """Every date the text actually states, parsed, so a date is compared as a date."""
+    found = set()
+    for pattern, (y, m, d) in _DATE_PATTERNS:
+        for match in re.finditer(pattern, text):
+            month = match.group(m)
+            month = int(month) if month.isdigit() else _MONTHS.get(month.lower())
+            try:
+                found.add(date(int(match.group(y)), month, int(match.group(d))))
+            except (TypeError, ValueError):
+                pass
+    return found
+
+
+def numbers_in(text: str) -> set[str]:
+    """Every number in the text as a whole token: '1,100.00' is 1100.00 and nothing else."""
+    return {t.replace(",", "") for t in re.findall(r"\d[\d,]*(?:\.\d+)?", text)}
+
+
 def score(inv: ExtractedInvoice, text: str) -> dict[str, float]:
     """Confidence is earned by evidence, not asserted.
 
-    A field scores high only if it was found at all *and* the exact value can
+    A field scores high only if it was found at all *and* the same value can
     be located in the document's text layer. This matters most for the LLM
     engine: a hallucinated invoice number or total does not appear in the
     source, scores low, and sends the document to a human.
+
+    Values are matched whole. An amount must equal a complete number in the
+    text (100.00 is not "found" inside 1,100.00), an identifier must stand as
+    its own token, and a date must equal a date the text states.
+
     With no text layer (a scan) nothing can be grounded, so every field is
     capped below the auto-pass threshold.
     """
-    flat = re.sub(r"[,\s$]", "", text)
+    flat = " ".join(text.split())
     has_text = bool(flat)
+    numbers, dates = numbers_in(text), dates_in(flat)
 
     def grounded(value) -> float:
         if value is None:
@@ -148,15 +185,16 @@ def score(inv: ExtractedInvoice, text: str) -> dict[str, float]:
         if not has_text:
             return 0.80
         if isinstance(value, Decimal):
-            needle = f"{value:.2f}"
+            found = f"{value:.2f}" in numbers
         elif isinstance(value, date):
-            return 0.99 if str(value.year) in flat and str(value.day) in flat else 0.5
+            found = value in dates
         else:
-            needle = re.sub(r"[,\s$]", "", str(value))
-        return 0.99 if needle in flat else 0.5
+            needle = re.escape(" ".join(str(value).split()))
+            found = re.search(rf"(?<![A-Za-z0-9]){needle}(?![A-Za-z0-9])", flat) is not None
+        return 0.99 if found else 0.5
 
     conf = {f: grounded(getattr(inv, f)) for f in
             ("vendor_name", "invoice_number", "invoice_date", "po_number", "subtotal", "tax", "total")}
-    conf["lines"] = min((min(grounded(l.amount), grounded(l.unit_price)) for l in inv.lines), default=0.0)
+    conf["lines"] = min((min(grounded(ln.amount), grounded(ln.unit_price)) for ln in inv.lines), default=0.0)
     conf["is_invoice"] = 0.99
     return conf

@@ -25,8 +25,9 @@ def load_master(conn: sqlite3.Connection, master: dict) -> None:
     for v in master["vendors"]:
         conn.execute("INSERT INTO vendors (id, name, category) VALUES (?, ?, ?)",
                      (v["id"], v["name"], v["category"]))
-        conn.execute("INSERT INTO vendor_alias (vendor_id, alias) VALUES (?, ?)",
-                     (v["id"], normalise(v["name"])))
+        for name in (v["name"], *v.get("aliases", [])):
+            conn.execute("INSERT OR IGNORE INTO vendor_alias (vendor_id, alias) VALUES (?, ?)",
+                         (v["id"], normalise(name)))
     for po in master["purchase_orders"]:
         conn.execute("INSERT INTO purchase_orders (po_number, vendor_id, order_date) VALUES (?, ?, ?)",
                      (po["po_number"], po["vendor_id"], po.get("order_date", "")))

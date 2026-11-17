@@ -3,6 +3,7 @@ import json
 
 from conftest import HIGH, invoice
 from invoice_extractor.models import Decision, ExtractedInvoice
+from invoice_extractor.vendor import confirm_alias
 
 
 def test_clean_invoice_auto_passes_and_queues_one_bill(conn, submit):
@@ -17,6 +18,21 @@ def test_clean_invoice_auto_passes_and_queues_one_bill(conn, submit):
 def test_printed_name_resolves_to_master_vendor(conn, submit):
     assert submit(invoice(vendor="CASCADE FASTENER COMPANY, INC.")).decision is Decision.AUTO_PASS
     assert conn.execute("SELECT vendor_id FROM invoices").fetchone()[0] == 1
+
+
+def test_a_near_miss_vendor_name_is_never_paid_on(conn, submit):
+    """One letter off a real vendor, on an invoice that otherwise matches its PO exactly."""
+    out = submit(invoice(vendor="Cascade Fastners Co."))
+    assert (out.decision, out.exception, out.queue) == (Decision.FLAG, "vendor_unconfirmed", "vendor_onboarding")
+    assert "Cascade Fastener Co." in out.reason            # the reviewer is told who it resembles
+    assert conn.execute("SELECT COUNT(*) FROM ledger_outbox").fetchone()[0] == 0
+    assert conn.execute("SELECT qty_billed FROM po_lines WHERE sku = 'FST-1'").fetchone()[0] == 0
+
+
+def test_once_a_person_confirms_the_name_it_matches(conn, submit):
+    assert submit(invoice(number="A", vendor="Cascade Fastners Co.")).exception == "vendor_unconfirmed"
+    confirm_alias(conn, 1, "Cascade Fastners Co.")
+    assert submit(invoice(number="B", vendor="Cascade Fastners Co.")).decision is Decision.AUTO_PASS
 
 
 def test_unknown_vendor_goes_to_onboarding(submit):

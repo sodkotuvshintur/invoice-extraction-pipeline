@@ -7,19 +7,19 @@
 | Metric | Value |
 |---|---|
 | **False auto-pass** (bad invoice queued for payment) | **0** |
-| Touchless rate (invoices auto-passed) | 61.7% |
-| Touchless ceiling (invoices that *should* auto-pass) | 61.7% |
+| Touchless rate (invoices auto-passed) | 58.3% |
+| Touchless ceiling (invoices that *should* auto-pass) | 58.3% |
 | Needless reviews (good invoice sent to a human) | 0 |
 | Decision accuracy | 100.0% |
 | Right decision, wrong exception type | 0 |
-| Value of problem invoices stopped | $110,699.45 |
+| Value of problem invoices stopped | $125,180.95 |
 
 ### Expected -> actual
 
 | Expected -> actual | Documents |
 |---|---|
-| auto_pass -> auto_pass | 71 |
-| flag -> flag | 38 |
+| auto_pass -> auto_pass | 67 |
+| flag -> flag | 42 |
 | hold -> hold | 6 |
 | not_applicable -> not_applicable | 5 |
 
@@ -27,11 +27,12 @@
 
 | Scenario | Documents | Fully correct |
 |---|---|---|
-| clean | 42 | 42 |
+| clean | 38 | 38 |
 | duplicate | 6 | 6 |
 | expense_normal | 14 | 14 |
 | expense_spike | 5 | 5 |
 | freeform | 8 | 8 |
+| lookalike_vendor | 4 | 4 |
 | math_error | 4 | 4 |
 | missing_po | 5 | 5 |
 | price_variance | 8 | 8 |
@@ -48,7 +49,7 @@ Share of invoices the engine read where the field exactly matches ground truth. 
 | Engine | Read | vendor_name | invoice_number | invoice_date | due_date | po_number | subtotal | tax | total | lines |
 |---|---|---|---|---|---|---|---|---|---|---|
 | rules | 107 | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
-| llm | 8 | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% |
+| llm | 8 | 100.0% | 100.0% | 100.0% | 100.0% | 100.0% | 75.0% | 100.0% | 100.0% | 100.0% |
 
 ## Work queues
 
@@ -57,5 +58,5 @@ Share of invoices the engine read where the field exactly matches ground truth. 
 | purchasing | 13 |
 | receiving | 11 |
 | ap_review | 10 |
-| vendor_onboarding | 5 |
+| vendor_onboarding | 9 |
 | accounting | 5 |

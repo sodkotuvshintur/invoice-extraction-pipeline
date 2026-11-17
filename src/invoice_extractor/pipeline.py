@@ -52,13 +52,17 @@ def _check(conn: sqlite3.Connection, invoice_id: int, content_hash: str, ext: Ex
                                 f">= {threshold:.2f}", f"{conf:.2f}")], None
     results.append(RuleResult(rule="confidence", passed=True, expected=f">= {threshold:.2f}", actual=f"{conf:.2f}"))
 
-    vendor = resolve(conn, inv.vendor_name, cfg["vendor_match_min_score"])
+    vendor = resolve(conn, inv.vendor_name, cfg["vendor_suggest_min_score"])
     if vendor is None:
         return results + [_fail("vendor_match", "vendor_unknown",
                                 f"'{inv.vendor_name}' does not match any active vendor", "a known vendor",
                                 inv.vendor_name)], None
-    results.append(RuleResult(rule="vendor_match", passed=True, expected=vendor.name,
-                              actual=f"{inv.vendor_name} (score {vendor.score})"))
+    if vendor.score < 1.0:
+        return results + [_fail("vendor_match", "vendor_unconfirmed",
+                                f"'{inv.vendor_name}' resembles {vendor.name} (similarity {vendor.score:.2f}) but is "
+                                f"not a confirmed name for it; confirm to add it as an alias, or reject",
+                                vendor.name, inv.vendor_name)], None
+    results.append(RuleResult(rule="vendor_match", passed=True, expected=vendor.name, actual=inv.vendor_name))
 
     # A resend is caught two ways: the same bytes, or the same number from the same vendor.
     prior = conn.execute(

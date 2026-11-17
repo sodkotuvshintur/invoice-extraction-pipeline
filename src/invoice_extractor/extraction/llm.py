@@ -85,17 +85,13 @@ def to_invoice(raw: LlmInvoice) -> ExtractedInvoice:
             continue
         lines.append(InvoiceLine(line_no=len(lines) + 1, sku=ln.sku, description=ln.description,
                                  qty=qty, unit_price=price, amount=amount))
-    subtotal, tax, total = _dec(raw.subtotal), _dec(raw.tax), _dec(raw.total)
-    if raw.is_invoice and lines:
-        # Small suppliers often print one figure. Filling in the subtotal from the
-        # lines is arithmetic, not guessing; the printed total is never touched.
-        subtotal = subtotal if subtotal is not None else sum((l.amount for l in lines), Decimal("0"))
-        if tax is None and total is not None:
-            tax = total - subtotal
+    # Nothing is derived. A subtotal or tax the document does not print stays
+    # None, so if the printed total disagrees with the lines there is no
+    # back-filled "tax" to absorb the difference and the arithmetic check fails.
     return ExtractedInvoice(
         is_invoice=raw.is_invoice, vendor_name=raw.vendor_name, invoice_number=raw.invoice_number,
         invoice_date=_date(raw.invoice_date), due_date=_date(raw.due_date), po_number=raw.po_number,
-        subtotal=subtotal, tax=tax, total=total, lines=lines,
+        subtotal=_dec(raw.subtotal), tax=_dec(raw.tax), total=_dec(raw.total), lines=lines,
     )
 
 
